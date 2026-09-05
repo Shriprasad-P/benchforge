@@ -1,0 +1,53 @@
+{
+  "id": "bounds-v0.1",
+  "version": "1",
+  "standard": "application",
+  "family": "boundaries",
+  "summary": "Inclusive integer ranges are a common off-by-one failure in coding evaluations.",
+  "task": {
+    "id": "bounds-001",
+    "title": "Sum an inclusive integer range",
+    "description": "inclusive_sum(start, stop) should add every integer from start through stop, inclusive. The current implementation uses a half-open range and therefore omits stop. start is always less than or equal to stop. Leave clamp() unchanged.",
+    "repository": "bundled://inclusive-sum",
+    "language": "Python",
+    "category": "Correctness",
+    "constraints": [
+      "Change only bounds.py.",
+      "Do not change tests.",
+      "Use only the Python standard library."
+    ]
+  },
+  "files": {
+    "bounds.py": "def clamp(value, low, high):\n    return min(max(value, low), high)\n\ndef inclusive_sum(start, stop):\n    total = 0\n    for value in range(start, stop):\n        total += value\n    return total\n"
+  },
+  "allowed_files": ["bounds.py"],
+  "expected": {
+    "input": "inclusive_sum(2, 5)",
+    "returns": "14"
+  },
+  "tests": {
+    "regression": "import unittest\nfrom bounds import clamp\n\nclass RegressionTests(unittest.TestCase):\n    def test_inside_range(self):\n        self.assertEqual(clamp(5, 0, 10), 5)\n\n    def test_below_low(self):\n        self.assertEqual(clamp(-2, 0, 3), 0)\n\n    def test_above_high(self):\n        self.assertEqual(clamp(9, 1, 4), 4)\n",
+    "issue": "import unittest\nfrom bounds import inclusive_sum\n\nclass IssueTests(unittest.TestCase):\n    def test_includes_stop(self):\n        self.assertEqual(inclusive_sum(2, 5), 14)\n\n    def test_single_value(self):\n        self.assertEqual(inclusive_sum(4, 4), 4)\n\n    def test_negatives(self):\n        self.assertEqual(inclusive_sum(-2, 2), 0)\n"
+  },
+  "baseline": {
+    "issue_exit_code": 1,
+    "issue_stderr_must_contain": ["AssertionError", "Ran 3 tests"]
+  },
+  "commands": {
+    "task": ["python", "-B", "-m", "unittest", "-v", "tests.test_issue"],
+    "regression": ["python", "-B", "-m", "unittest", "-v", "tests.test_regression"]
+  },
+  "mocks": {
+    "fixed": {
+      "bounds.py": "def clamp(value, low, high):\n    return min(max(value, low), high)\n\ndef inclusive_sum(start, stop):\n    total = 0\n    for value in range(start, stop + 1):\n        total += value\n    return total\n"
+    }
+  },
+  "environment": {
+    "runtime": "Python 3.12",
+    "network": "none",
+    "memory": "256m",
+    "cpus": "1",
+    "pids": 64
+  },
+  "timeout_seconds": 30
+}

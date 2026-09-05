@@ -4,7 +4,7 @@ const ACTIVE = new Set([
   "QUEUED", "PREPARING", "BASELINE", "MODEL", "PATCH", "EVALUATING"
 ]);
 const EXCLUDED = new Set([
-  "INFRA_ERROR", "BASELINE_INVALID", "INTERRUPTED"
+  "INFRA_ERROR", "BASELINE_INVALID", "INTERRUPTED", "CANCELLED"
 ]);
 const STATUS_LABELS = {
   QUEUED: "Queued",
@@ -21,6 +21,7 @@ const STATUS_LABELS = {
   INFRA_ERROR: "Infrastructure error",
   BASELINE_INVALID: "Invalid baseline",
   INTERRUPTED: "Interrupted",
+  CANCELLED: "Cancelled",
 };
 
 const state = {
@@ -35,6 +36,10 @@ const state = {
   refreshing: false,
   refreshAgain: false,
   loaded: false,
+  health: null,
+  catalog: null,
+  selectedBenchmarkId: "tiny-v0.1",
+  view: "evaluations",
 };
 
 let toastTimer;
@@ -98,6 +103,149 @@ function toast(message) {
   toastTimer = setTimeout(() => $("#toast").classList.remove("show"), 4000);
 }
 
+function setHealthItem(selector, ok, title) {
+  const element = $(selector);
+  if (!element) return;
+  element.dataset.ok = ok === "warn" ? "warn" : ok ? "true" : "false";
+  if (title) element.title = title;
+}
+
+function renderHealth(health) {
+  if (!health) return;
+  state.health = health;
+  setHealthItem(
+    "#health-git",
+    health.git_installed,
+    health.git_installed ? "Git is available" : "Git was not found on PATH"
+  );
+  setHealthItem(
+    "#health-docker",
+    health.docker_daemon,
+    health.docker_daemon
+      ? "Docker daemon is reachable"
+      : health.docker_installed
+        ? "Docker is installed but the daemon is not reachable"
+        : "Docker was not found on PATH"
+  );
+  setHealthItem(
+    "#health-image",
+    health.image_present,
+    health.image_present
+      ? (health.image_id || health.image)
+      : `${health.image} is not present locally`
+  );
+  setHealthItem(
+    "#health-provider",
+    health.provider_configured ? true : "warn",
+    health.provider_configured
+      ? "At least one provider model is configured"
+      : "Set PROVIDER_MODEL or ANTHROPIC_MODEL to enable a provider"
+  );
+}
+
+function applyAdapterAvailability(health) {
+  const providers = health?.providers || {};
+  const chat = $("#option-chat");
+  const anthropic = $("#option-anthropic");
+  if (chat) chat.disabled = !providers["chat-completions"];
+  if (anthropic) anthropic.disabled = !providers["anthropic-messages"];
+
+  const selected = $("#adapter").value;
+  if (selected === "chat-completions" && chat?.disabled) {
+    $("#adapter").value = "mock-fixed";
+    updateAdapterNote();
+  }
+  if (selected === "anthropic-messages" && anthropic?.disabled) {
+    $("#adapter").value = "mock-fixed";
+    updateAdapterNote();
+  }
+}
+
+function selectedBenchmark() {
+  const items = state.catalog?.benchmarks || [];
+  return items.find(item => item.id === state.selectedBenchmarkId) || items[0] || null;
+}
+
+function populateBenchmarkSelect() {
+  const select = $("#benchmark-select");
+  if (!select || !state.catalog) return;
+  const current = state.selectedBenchmarkId;
+  select.innerHTML = (state.catalog.benchmarks || []).map(item => {
+    const task = item.task || {};
+    const label = `${item.id} — ${task.title || item.id}`;
+    return `<option value="${escapeHTML(item.id)}">${escapeHTML(label)}</option>`;
+  }).join("");
+  if ([...select.options].some(option => option.value === current)) {
+    select.value = current;
+  }
+}
+
+function renderCatalog(data) {
+  if (!data?.benchmarks) return;
+  state.catalog = data;
+  if (!data.benchmarks.some(item => item.id === state.selectedBenchmarkId)) {
+    state.selectedBenchmarkId = data.benchmarks[0].id;
+  }
+  populateBenchmarkSelect();
+  const note = $("#dialog-benchmark-note");
+  if (note) {
+    note.textContent = `${data.benchmarks.length} bundled tasks · hidden tests stay on the host`;
+  }
+
+  const markup = data.benchmarks.map(item => {
+    const task = item.task || {};
+    const expected = item.expected || {};
+    const spec = [
+      expected.input && `input ${expected.input}`,
+      expected.raises && `raises ${expected.raises}`,
+      expected.returns && `returns ${expected.returns}`,
+    ].filter(Boolean).join(" · ");
+    return `<article class="suite-card">
+      <div class="kicker">${escapeHTML([task.language, task.category].filter(Boolean).join(" / ").toUpperCase())}</div>
+      <h3>${escapeHTML(task.title || item.id)}</h3>
+      <p>${escapeHTML(item.summary || task.description || "")}</p>
+      <div class="facts">
+        <span>${escapeHTML(item.id)}</span>
+        <span>edit ${escapeHTML((item.allowed_files || []).join(", "))}</span>
+        <span>${escapeHTML(String(item.timeout_seconds))}s</span>
+      </div>
+      ${spec ? `<div class="code-spec"><code>${escapeHTML(spec)}</code></div>` : ""}
+      <footer>
+        <span class="standard-tag">${escapeHTML(item.standard || "application").toUpperCase()}</span>
+        <button type="button" class="text-button" data-run-benchmark="${escapeHTML(item.id)}">
+          Run task <span aria-hidden="true">→</span>
+        </button>
+      </footer>
+    </article>`;
+  }).join("");
+  const grid = $("#suite-grid");
+  if (grid) grid.innerHTML = markup;
+}
+
+function runActionButtons(run) {
+  const id = escapeHTML(run.id);
+  const short = escapeHTML(run.id.slice(0, 8));
+  const inspect = `<button
+        class="row-open"
+        data-inspect="${id}"
+        aria-label="Inspect run ${short}"
+        title="Inspect run"
+      >↗</button>`;
+
+  if (ACTIVE.has(run.status)) {
+    return `<div class="row-actions">
+      <button class="row-action" data-action="cancel" data-id="${id}">Cancel</button>
+      ${inspect}
+    </div>`;
+  }
+
+  return `<div class="row-actions">
+      <button class="row-action" data-action="retry" data-id="${id}">Retry</button>
+      <button class="row-action" data-action="delete" data-id="${id}">Delete</button>
+      ${inspect}
+    </div>`;
+}
+
 async function api(url, options = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20000);
@@ -121,6 +269,8 @@ async function api(url, options = {}) {
       } catch {}
       throw new Error(message);
     }
+
+    if (response.status === 204) return null;
 
     return await response.json();
   } catch (error) {
@@ -236,7 +386,7 @@ function renderComparison() {
 
 function visibleRuns() {
   return state.runs.filter(run => {
-    const searchable = `${run.model} ${run.id} ${run.task_id}`.toLowerCase();
+    const searchable = `${run.model} ${run.id} ${run.task_id} ${run.benchmark_id || ""}`.toLowerCase();
     if (!searchable.includes(state.search)) return false;
 
     if (state.filter === "active") return ACTIVE.has(run.status);
@@ -269,7 +419,15 @@ function renderTable() {
   const markup = runs.map(run => `<tr>
     <td>
       <div class="run-id">${escapeHTML(run.id.slice(0, 8))}<span class="trial-label">#${escapeHTML(run.trial)}</span></div>
-      <div class="task-subtitle">${escapeHTML(run.task_id)}</div>
+      <div class="task-subtitle">${
+        run.parent_run_id
+          ? `retry of ${escapeHTML(run.parent_run_id.slice(0, 8))}`
+          : escapeHTML(run.adapter || "")
+      }</div>
+    </td>
+    <td>
+      <div class="model-name" title="${escapeHTML(run.benchmark_id || "")}">${escapeHTML(run.benchmark_id || "—")}</div>
+      <div class="task-subtitle">${escapeHTML(run.task_id || "")}</div>
     </td>
     <td>
       <div class="model-name" title="${escapeHTML(run.model)}">${escapeHTML(run.model)}</div>
@@ -282,26 +440,24 @@ function renderTable() {
       <span class="patch-remove">−${escapeHTML(run.lines_removed)}</span>
     </td>
     <td>${escapeHTML(shortDate(run.created_at))}</td>
-    <td>
-      <button
-        class="row-open"
-        data-run="${escapeHTML(run.id)}"
-        aria-label="Inspect run ${escapeHTML(run.id.slice(0, 8))}"
-        title="Inspect run"
-      >↗</button>
-    </td>
+    <td>${runActionButtons(run)}</td>
   </tr>`).join("");
 
   // Avoid replacing focused buttons every polling interval.
   if (markup !== state.tableMarkup) {
-    const focusedRun = document.activeElement?.dataset?.run;
+    const focused = document.activeElement;
+    const focusInspect = focused?.dataset?.inspect;
+    const focusAction = focused?.dataset?.action;
+    const focusId = focused?.dataset?.id;
     $("#runs-body").innerHTML = markup;
     state.tableMarkup = markup;
 
-    if (focusedRun) {
-      const replacement = [...document.querySelectorAll("[data-run]")]
-        .find(button => button.dataset.run === focusedRun);
-      replacement?.focus({ preventScroll: true });
+    if (focusInspect) {
+      document.querySelector(`[data-inspect="${CSS.escape(focusInspect)}"]`)
+        ?.focus({ preventScroll: true });
+    } else if (focusAction && focusId) {
+      document.querySelector(`[data-action="${CSS.escape(focusAction)}"][data-id="${CSS.escape(focusId)}"]`)
+        ?.focus({ preventScroll: true });
     }
   }
 }
@@ -370,13 +526,19 @@ function renderDetail(run) {
   $("#detail-content").innerHTML = `
     <div class="detail-status-line">
       ${badge(run.status)}
-      <span class="subtle">Trial ${escapeHTML(run.trial)} · ${escapeHTML(shortDate(run.created_at))}</span>
+      <span class="inspector-actions">
+        ${ACTIVE.has(run.status)
+          ? `<button class="row-action" data-action="cancel" data-id="${escapeHTML(run.id)}">Cancel run</button>`
+          : `<button class="row-action" data-action="retry" data-id="${escapeHTML(run.id)}">Retry</button>
+             <button class="row-action" data-action="delete" data-id="${escapeHTML(run.id)}">Delete</button>`}
+        <span class="subtle">Trial ${escapeHTML(run.trial)} · ${escapeHTML(shortDate(run.created_at))}</span>
+      </span>
     </div>
 
     <p class="detail-context">
       ${run.demo
         ? "Mock smoke test. This run measures harness behavior, not model coding quality."
-        : "Provider evaluation on the bundled synthetic fixture."}
+        : "Provider evaluation on a bundled synthetic fixture."}
     </p>
 
     <div class="detail-summary">
@@ -487,8 +649,14 @@ async function refresh() {
   state.refreshing = true;
 
   try {
-    state.runs = await api("/api/runs");
+    const [runs, health] = await Promise.all([
+      api("/api/runs"),
+      api("/api/health"),
+    ]);
+    state.runs = runs;
     state.loaded = true;
+    renderHealth(health);
+    applyAdapterAvailability(health);
     renderMetrics();
     renderComparison();
     renderTable();
@@ -521,35 +689,56 @@ async function refresh() {
 }
 
 function updateAdapterNote() {
-  $("#adapter-note").textContent = $("#adapter").value === "openai-compatible"
-    ? "Uses the server's OPENAI_BASE_URL, OPENAI_MODEL, and optional OPENAI_API_KEY. Selected public source context is sent to that provider. Hidden tests are not included."
-    : "Mock adapters are deterministic smoke tests. They verify the evaluation harness, not a model's coding ability.";
+  const adapter = $("#adapter").value;
+  if (adapter === "chat-completions") {
+    $("#adapter-note").textContent =
+      "POST /chat/completions to PROVIDER_BASE_URL (OpenAI, Groq, Gemini OpenAI-compat, Ollama, OpenRouter, Mistral, Together, Azure, vLLM, …). Uses PROVIDER_MODEL and optional PROVIDER_API_KEY. Hidden tests are not sent.";
+  } else if (adapter === "anthropic-messages") {
+    $("#adapter-note").textContent =
+      "POST /v1/messages to ANTHROPIC_BASE_URL. Uses ANTHROPIC_MODEL and optional ANTHROPIC_API_KEY. Hidden tests are not sent.";
+  } else {
+    $("#adapter-note").textContent =
+      "Mock adapters are deterministic smoke tests. They verify the evaluation harness, not a model's coding ability.";
+  }
 }
 
-async function openRunDialog() {
+async function openRunDialog(benchmarkId) {
+  if (benchmarkId) state.selectedBenchmarkId = benchmarkId;
+  populateBenchmarkSelect();
   $("#form-error").hidden = true;
   $("#form-error").textContent = "";
   $("#docker-info").textContent = "Checking local configuration…";
+  $("#submit-run").disabled = true;
   updateAdapterNote();
 
   if (!$("#run-dialog").open) $("#run-dialog").showModal();
 
   try {
-    const health = await api("/api/health");
+    const health = await api("/api/health?refresh=true");
+    renderHealth(health);
+    applyAdapterAvailability(health);
+
     if (!health.git_installed || !health.docker_installed) {
       $("#docker-info").textContent =
         "Git or Docker was not found. Install both before running.";
-    } else {
+    } else if (!health.docker_daemon) {
       $("#docker-info").textContent =
-        `${health.image} · Docker daemon and image availability are checked at execution.`;
+        "Docker is installed but the daemon is not reachable. Start Docker Desktop.";
+    } else if (!health.image_present) {
+      $("#docker-info").textContent =
+        `${health.image} is not present locally. Pull the image before running.`;
+    } else {
+      const digest = (health.image_digests || [])[0] || health.image_id || health.image;
+      $("#docker-info").textContent = digest;
+      $("#submit-run").disabled = false;
     }
   } catch {
     $("#docker-info").textContent = "Cannot reach the API.";
   }
 }
 
-["#new-run", "#fixture-run", "#empty-run"].forEach(selector => {
-  $(selector).addEventListener("click", openRunDialog);
+["#new-run", "#empty-run"].forEach(selector => {
+  $(selector).addEventListener("click", () => openRunDialog());
 });
 
 ["#close-dialog", "#cancel-dialog"].forEach(selector => {
@@ -568,16 +757,26 @@ $("#run-form").addEventListener("submit", async event => {
   $("#form-error").hidden = true;
 
   try {
+    const adapter = $("#adapter").value;
+    if (adapter === "chat-completions" && !state.health?.providers?.["chat-completions"]) {
+      throw new Error("Set PROVIDER_MODEL (or OPENAI_MODEL) before using chat completions.");
+    }
+    if (adapter === "anthropic-messages" && !state.health?.providers?.["anthropic-messages"]) {
+      throw new Error("Set ANTHROPIC_MODEL before using Anthropic Messages.");
+    }
+
     const result = await api("/api/runs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         adapter: $("#adapter").value,
+        benchmark_id: $("#benchmark-select").value,
         trials: Number($("#trials").value),
       }),
     });
 
     $("#run-dialog").close();
+    setView("evaluations");
     const count = result.run_ids.length;
     toast(`${count} evaluation${count === 1 ? "" : "s"} queued.`);
     refresh();
@@ -615,11 +814,47 @@ $("#search").addEventListener("input", event => {
   renderTable();
 });
 
+async function handleRunAction(action, id, button) {
+  if (!action || !id) return;
+  if (button) button.disabled = true;
+
+  try {
+    if (action === "cancel") {
+      await api(`/api/runs/${encodeURIComponent(id)}/cancel`, { method: "POST" });
+      toast("Cancellation requested.");
+    } else if (action === "retry") {
+      const result = await api(
+        `/api/runs/${encodeURIComponent(id)}/retry`,
+        { method: "POST" },
+      );
+      toast(`${result.run_ids.length} evaluation queued.`);
+    } else if (action === "delete") {
+      if (!window.confirm("Delete this run and its artifacts?")) return;
+      await api(`/api/runs/${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (state.detail === id) $("#detail-dialog").close();
+      toast("Run deleted.");
+    } else {
+      return;
+    }
+    refresh();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 $("#runs-body").addEventListener("click", async event => {
-  const button = event.target.closest("[data-run]");
+  const action = event.target.closest("[data-action]");
+  if (action) {
+    await handleRunAction(action.dataset.action, action.dataset.id, action);
+    return;
+  }
+
+  const button = event.target.closest("[data-inspect]");
   if (!button) return;
 
-  const id = button.dataset.run;
+  const id = button.dataset.inspect;
   state.detail = id;
   state.detailRecord = null;
   state.detailVersion = null;
@@ -650,6 +885,12 @@ $("#detail-dialog").addEventListener("close", () => {
 });
 
 $("#detail-content").addEventListener("click", async event => {
+  const action = event.target.closest("[data-action]");
+  if (action) {
+    await handleRunAction(action.dataset.action, action.dataset.id, action);
+    return;
+  }
+
   const button = event.target.closest("[data-copy]");
   if (!button || !state.detailRecord?.patch) return;
 
@@ -675,14 +916,61 @@ document.querySelectorAll("dialog").forEach(dialog => {
   });
 });
 
-function updateNavigation() {
-  const target = location.hash === "#benchmark" ? "#benchmark" : "#runs";
-  document.querySelectorAll(".main-nav a[href^='#']").forEach(link => {
-    link.classList.toggle("selected", link.getAttribute("href") === target);
+function setView(view) {
+  const next = view === "benchmarks" ? "benchmarks" : "evaluations";
+  state.view = next;
+  document.body.dataset.view = next;
+  const hash = next === "benchmarks" ? "#benchmarks" : "#evaluations";
+  if (location.hash !== hash) {
+    history.replaceState(null, "", hash);
+  }
+  document.querySelectorAll(".main-nav a[data-view]").forEach(link => {
+    link.classList.toggle("selected", link.dataset.view === next);
   });
+  $("#page-eyebrow").textContent =
+    next === "benchmarks" ? "WORKSPACE / BENCHMARKS" : "WORKSPACE / EVALUATIONS";
+  $("#page-title").textContent = next === "benchmarks" ? "Benchmarks" : "Evaluations";
+  $("#page-lead").textContent = next === "benchmarks"
+    ? "The starter suite that the harness and dashboard are measured against."
+    : "Run a coding task. Inspect the patch. Verify the outcome.";
+  $("#view-evaluations").hidden = next !== "evaluations";
+  $("#view-benchmarks").hidden = next !== "benchmarks";
+}
+
+function updateNavigation() {
+  const hash = location.hash;
+  if (hash === "#benchmarks" || hash === "#benchmark") {
+    setView("benchmarks");
+    return;
+  }
+  setView("evaluations");
 }
 
 window.addEventListener("hashchange", updateNavigation);
+
+$("#suite-grid").addEventListener("click", event => {
+  const button = event.target.closest("[data-run-benchmark]");
+  if (!button) return;
+  openRunDialog(button.dataset.runBenchmark);
+});
+
+$("#benchmark-select").addEventListener("change", event => {
+  state.selectedBenchmarkId = event.target.value;
+});
+
+$("#health-refresh").addEventListener("click", async () => {
+  $("#health-refresh").disabled = true;
+  try {
+    const health = await api("/api/health?refresh=true");
+    renderHealth(health);
+    applyAdapterAvailability(health);
+    toast("Health refreshed.");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    $("#health-refresh").disabled = false;
+  }
+});
 
 document.addEventListener("keydown", event => {
   const target = event.target;
@@ -710,4 +998,8 @@ document.addEventListener("visibilitychange", () => {
 
 updateNavigation();
 renderComparison();
+api("/api/benchmarks").then(renderCatalog).catch(() => {
+  $("#suite-grid").innerHTML =
+    '<p class="subtle">Could not load the fixture suite from the API.</p>';
+});
 refresh();

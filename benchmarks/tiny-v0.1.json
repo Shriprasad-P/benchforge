@@ -1,6 +1,9 @@
 {
   "id": "tiny-v0.1",
   "version": "1",
+  "standard": "application",
+  "family": "error-handling",
+  "summary": "Preserve working numeric behavior while replacing a crash with an explicit contract.",
   "task": {
     "id": "calculator-001",
     "title": "Handle empty averages correctly",
@@ -14,7 +17,32 @@
       "Use only the Python standard library."
     ]
   },
-  "source": "def average(values):\n    return sum(values) / len(values)\n",
+  "files": {
+    "calculator.py": "def average(values):\n    return sum(values) / len(values)\n"
+  },
+  "allowed_files": ["calculator.py"],
+  "expected": {
+    "input": "average([])",
+    "raises": "ValueError",
+    "message": "values must not be empty"
+  },
+  "tests": {
+    "regression": "import unittest\nfrom calculator import average\n\nclass RegressionTests(unittest.TestCase):\n    def test_integer_values(self):\n        self.assertEqual(average([2, 4, 6]), 4)\n\n    def test_single_value(self):\n        self.assertEqual(average([9]), 9)\n\n    def test_negative_values(self):\n        self.assertEqual(average([-6, -2]), -4)\n\n    def test_fractional_values(self):\n        self.assertAlmostEqual(average([1.5, 2.5]), 2.0)\n",
+    "issue": "import unittest\nfrom calculator import average\n\nclass IssueTests(unittest.TestCase):\n    def test_empty_values_raise_explicit_error(self):\n        with self.assertRaises(ValueError) as caught:\n            average([])\n        self.assertEqual(str(caught.exception), \"values must not be empty\")\n"
+  },
+  "baseline": {
+    "issue_exit_code": 1,
+    "issue_stderr_must_contain": ["ZeroDivisionError", "Ran 1 test"]
+  },
+  "commands": {
+    "task": ["python", "-B", "-m", "unittest", "-v", "tests.test_issue"],
+    "regression": ["python", "-B", "-m", "unittest", "-v", "tests.test_regression"]
+  },
+  "mocks": {
+    "fixed": {
+      "calculator.py": "def average(values):\n    if not values:\n        raise ValueError('values must not be empty')\n    return sum(values) / len(values)\n"
+    }
+  },
   "environment": {
     "runtime": "Python 3.12",
     "network": "none",

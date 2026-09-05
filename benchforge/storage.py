@@ -37,6 +37,14 @@ def initialize():
 
 
 def save(record):
+    existing = get(record["id"])
+    if (
+        existing
+        and existing["status"] == "CANCELLED"
+        and record["status"] in ACTIVE
+    ):
+        return
+
     with connect() as connection:
         connection.execute(
             """
@@ -70,9 +78,18 @@ def list_runs():
     return [json.loads(row[0]) for row in rows]
 
 
+def delete(run_id):
+    with connect() as connection:
+        connection.execute("DELETE FROM runs WHERE id=?", (run_id,))
+
+
 def recover_interrupted():
     for record in list_runs():
         if record["status"] in ACTIVE:
-            record["status"] = "INTERRUPTED"
-            record["errors"].append("Controller stopped before this run finished.")
+            if record.get("cancel_requested"):
+                record["status"] = "CANCELLED"
+                record["errors"].append("Run cancelled.")
+            else:
+                record["status"] = "INTERRUPTED"
+                record["errors"].append("Controller stopped before this run finished.")
             save(record)

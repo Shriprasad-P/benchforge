@@ -4,7 +4,7 @@ A local-first coding evaluation starter with a responsive web dashboard.
 
 ## Requirements
 
-- Python 3.11+
+- Python 3.11+ (3.13 recommended; 3.14 needs current pydantic wheels)
 - Git
 - Docker Engine or Docker Desktop, running
 - An explicitly pulled Python sandbox image
@@ -34,7 +34,10 @@ distributed scheduler. Do not use --reload while evaluations are running.
 - JSON artifacts and CSV export
 - Repeated trials
 - Two explicit smoke-test mock adapters
-- Optional OpenAI-compatible patch-generation adapter
+- Optional HTTP providers: chat completions (OpenAI-compatible APIs) and Anthropic Messages
+- Runtime health for Git, Docker daemon, and sandbox image, with a manual refresh
+- Cancel, retry, and delete completed runs
+- Five bundled Python fixtures covering application contracts and patch-scope rules
 - Baseline validation, patch validation, task tests, regression tests
 - Centralized subprocess and Git utilities
 - Docker execution with network disabled, read-only mounts, non-root user,
@@ -42,29 +45,42 @@ distributed scheduler. Do not use --reload while evaluations are running.
 
 ## Important scope
 
-The bundled benchmark is a small synthetic fixture, not a real-world
-leaderboard. Mock adapter results are infrastructure smoke tests and must not
-be reported as model-quality evidence.
+The bundled suite is synthetic. Mock adapter results are infrastructure smoke
+tests and must not be reported as model-quality evidence.
 
-This starter intentionally supports one patch-only Python task. It does not
-implement GitHub mining, arbitrary remote repositories, autonomous tool-using
-agents, authentication, distributed workers, or multi-tenant hosting.
+This starter supports patch-only Python tasks. It does not implement GitHub
+mining, arbitrary remote repositories, autonomous tool-using agents,
+authentication, distributed workers, or multi-tenant hosting.
 
 The app binds to localhost by default. Do not expose it publicly.
 
-## Optional provider
+## Optional providers
+
+Copy `.env.example` to `.env` in the project directory, or export variables in
+your shell. The server loads `.env` on startup and does not override variables
+already in the environment. Restart after changes.
+
+Chat completions (`adapter: chat-completions`) uses POST `/chat/completions`.
+Point `PROVIDER_BASE_URL` at any compatible host:
 
 ```bash
-export OPENAI_BASE_URL="https://api.openai.com/v1"
-export OPENAI_API_KEY="your-key"
-export OPENAI_MODEL="your-model-id"
+export PROVIDER_BASE_URL="https://api.openai.com/v1"
+export PROVIDER_API_KEY="your-key"
+export PROVIDER_MODEL="your-model-id"
 ```
 
-Restart the server after changing configuration.
+`OPENAI_BASE_URL`, `OPENAI_API_KEY`, and `OPENAI_MODEL` remain aliases.
+Azure OpenAI may put `api-version` in the URL query and set `PROVIDER_AUTH=api-key`.
+Local Ollama typically needs no key (`PROVIDER_AUTH=none`).
 
-The adapter uses POST /chat/completions. Providers that require a different API,
-special reasoning parameters, or nonstandard token limits need an adapter
-extension.
+Anthropic (`adapter: anthropic-messages`) uses POST `/v1/messages`:
+
+```bash
+export ANTHROPIC_API_KEY="your-key"
+export ANTHROPIC_MODEL="your-model-id"
+```
+
+Providers that need a different protocol still need an adapter extension.
 
 Only the public issue and selected source file go to the provider. Hidden
 tests and evaluator metadata are not included in the request.
@@ -77,6 +93,20 @@ Do not put secrets in the API base URL.
 
 Costs are unknown/null: this starter does not invent pricing.
 A provider model identifier is not necessarily an immutable model version.
+
+## Starter suite
+
+These fixtures are the local standard the dashboard and harness are built to run:
+
+| ID | Standard | What it checks |
+| --- | --- | --- |
+| `scope-v0.1` | Platform | Patch allowlist: fix `registry.py`, leave `util.py` alone |
+| `tiny-v0.1` | Application | Replace a crash with an explicit error contract |
+| `bounds-v0.1` | Application | Inclusive range / off-by-one without breaking neighbors |
+| `merge-v0.1` | Application | Nested mapping merge without mutating inputs |
+| `query-v0.1` | Application | `+` and percent-decoding in form-urlencoded queries |
+
+Hidden tests, source, and mock patches are never returned by `GET /api/benchmarks`.
 
 ## Reproducibility
 
@@ -109,8 +139,8 @@ The Docker socket is used by the trusted controller and is never mounted into
 a task container.
 
 Agent-style direct filesystem access is not implemented. The patch-only
-adapter sees an explicit allowlist of source context. Only calculator.py may
-be changed in this fixture.
+adapter sees bundled source context. Only allowlisted files may be changed;
+`scope-v0.1` exists to keep that rule honest.
 
 Hidden tests are supplied for evaluation, not to the model. However, Python
 code under test shares an interpreter with the test framework and can attempt
@@ -129,10 +159,11 @@ There is no host-execution fallback when Docker is unavailable.
 python -m unittest discover -s tests -v
 ```
 
-These test schema-independent patch/process helpers. For an end-to-end smoke
-test, run both mock adapters from the dashboard:
+These test schema-independent patch/process helpers and provider payload
+parsing. For an end-to-end smoke test, run both mock adapters from the
+dashboard against each bundled fixture:
 
-- Mock / fixed should resolve the fixture
+- Mock / fixed should resolve the selected fixture
 - Mock / unchanged should fail its task-specific test
 
 A Docker outage should produce INFRA_ERROR, not a model failure.
@@ -150,16 +181,25 @@ benchforge/
   schema.py        public and hidden data types
   static/          dashboard
 benchmarks/
-  tiny-v0.1.json    declarative fixture definition
+  tiny-v0.1.json     error handling
+  bounds-v0.1.json   inclusive range / off-by-one
+  merge-v0.1.json    nested dict contract
+  query-v0.1.json    URL-encoded query protocol
+  scope-v0.1.json    allowlisted patch, read-only helper
 tests/
   test_core.py
 
 ## API
 
 GET  /api/health
-GET  /api/benchmark
+GET  /api/benchmarks
+GET  /api/benchmarks/{id}
+GET  /api/benchmark          (alias of /api/benchmarks)
 GET  /api/runs
 POST /api/runs
+POST /api/runs/{id}/cancel
+POST /api/runs/{id}/retry
+DELETE /api/runs/{id}
 GET  /api/runs/{id}
 GET  /api/runs/{id}/artifacts/{name}
 GET  /api/export.csv
@@ -169,11 +209,16 @@ POST /api/runs:
 ```json
 {
   "adapter": "mock-fixed",
+  "benchmark_id": "tiny-v0.1",
   "trials": 2
 }
 ```
 
-Allowed adapters: mock-fixed, mock-unchanged, openai-compatible.
+Allowed adapters: mock-fixed, mock-unchanged, chat-completions,
+openai-compatible (alias), anthropic-messages.
+
+POST /api/runs returns 503 if Git, the Docker daemon, or the sandbox image
+is unavailable. Provider adapters return 400 until their model env is set.
 
 Generated artifacts:
 - result.json
@@ -182,7 +227,7 @@ Generated artifacts:
 
 ## Next extension points
 
-1. Introduce a versioned multi-repository benchmark schema.
+1. Add mined or multi-language tasks on top of the bundled Python suite.
 2. Add trusted image builders and dependency lock validation.
 3. Add independent evaluator services and stronger isolation.
 4. Implement agent tool permissions and complete trajectories.

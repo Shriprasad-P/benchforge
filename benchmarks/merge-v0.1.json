@@ -1,0 +1,53 @@
+{
+  "id": "merge-v0.1",
+  "version": "1",
+  "standard": "application",
+  "family": "data-structures",
+  "summary": "Nested mapping updates must merge dictionaries instead of replacing them.",
+  "task": {
+    "id": "merge-001",
+    "title": "Deep-merge nested dictionaries",
+    "description": "deep_merge(left, right) should return a new mapping. Nested dictionaries must be merged recursively. Non-dict values in right replace left. Do not mutate the input mappings.",
+    "repository": "bundled://deep-merge",
+    "language": "Python",
+    "category": "API contract",
+    "constraints": [
+      "Change only merge.py.",
+      "Do not change tests.",
+      "Use only the Python standard library."
+    ]
+  },
+  "files": {
+    "merge.py": "def deep_merge(left, right):\n    merged = dict(left)\n    merged.update(right)\n    return merged\n"
+  },
+  "allowed_files": ["merge.py"],
+  "expected": {
+    "input": "deep_merge({'a': {'x': 1}}, {'a': {'y': 2}})",
+    "returns": "{'a': {'x': 1, 'y': 2}}"
+  },
+  "tests": {
+    "regression": "import unittest\nfrom merge import deep_merge\n\nclass RegressionTests(unittest.TestCase):\n    def test_top_level_replace(self):\n        left = {'a': 1, 'b': 2}\n        right = {'b': 3, 'c': 4}\n        self.assertEqual(deep_merge(left, right), {'a': 1, 'b': 3, 'c': 4})\n        self.assertEqual(left, {'a': 1, 'b': 2})\n\n    def test_empty_right(self):\n        left = {'a': 1}\n        self.assertEqual(deep_merge(left, {}), {'a': 1})\n        self.assertIsNot(deep_merge(left, {}), left)\n\n    def test_non_dict_overwrites_dict(self):\n        self.assertEqual(deep_merge({'a': {'x': 1}}, {'a': 9}), {'a': 9})\n",
+    "issue": "import unittest\nfrom merge import deep_merge\n\nclass IssueTests(unittest.TestCase):\n    def test_nested_dicts_merge(self):\n        left = {'a': {'x': 1, 'y': 2}, 'keep': 0}\n        right = {'a': {'y': 8, 'z': 3}}\n        self.assertEqual(\n            deep_merge(left, right),\n            {'a': {'x': 1, 'y': 8, 'z': 3}, 'keep': 0},\n        )\n        self.assertEqual(left['a'], {'x': 1, 'y': 2})\n"
+  },
+  "baseline": {
+    "issue_exit_code": 1,
+    "issue_stderr_must_contain": ["AssertionError", "Ran 1 test"]
+  },
+  "commands": {
+    "task": ["python", "-B", "-m", "unittest", "-v", "tests.test_issue"],
+    "regression": ["python", "-B", "-m", "unittest", "-v", "tests.test_regression"]
+  },
+  "mocks": {
+    "fixed": {
+      "merge.py": "def deep_merge(left, right):\n    merged = dict(left)\n    for key, value in right.items():\n        current = merged.get(key)\n        if isinstance(current, dict) and isinstance(value, dict):\n            merged[key] = deep_merge(current, value)\n        else:\n            merged[key] = value\n    return merged\n"
+    }
+  },
+  "environment": {
+    "runtime": "Python 3.12",
+    "network": "none",
+    "memory": "256m",
+    "cpus": "1",
+    "pids": 64
+  },
+  "timeout_seconds": 30
+}

@@ -1,6 +1,5 @@
 import csv
 import io
-import os
 import shutil
 import threading
 import uuid
@@ -9,13 +8,24 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import storage
-from .engine import BENCHMARK, IMAGE, new_record, run_evaluation
+from .adapters import PROVIDER_ADAPTERS
+from .envfile import load_env_file
+from .engine import (
+    FIXTURES,
+    fixture_by_id,
+    new_record,
+    probe_environment,
+    public_benchmark,
+    public_catalog,
+    request_cancel,
+    run_evaluation,
+)
 from .schema import RunRequest
 
 STATIC = Path(__file__).parent / "static"
@@ -27,6 +37,7 @@ MAX_PENDING = 30
 @asynccontextmanager
 async def lifespan(app):
     global POOL
+    load_env_file()
     storage.initialize()
     storage.recover_interrupted()
     POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="benchforge")
@@ -73,26 +84,26 @@ def index():
 
 
 @app.get("/api/health")
-def health():
-    return {
-        "git_installed": bool(shutil.which("git")),
-        "docker_installed": bool(shutil.which("docker")),
-        "image": IMAGE,
-        "provider_configured": bool(os.getenv("OPENAI_MODEL")),
-        "note": "Executable detection only; daemon and image are checked per run.",
-    }
+def health(refresh: bool = Query(default=False)):
+    return probe_environment(force=refresh)
+
+
+@app.get("/api/benchmarks")
+def benchmarks():
+    return public_catalog()
+
+
+@app.get("/api/benchmarks/{benchmark_id}")
+def benchmark_detail(benchmark_id: str):
+    try:
+        return public_benchmark(fixture_by_id(benchmark_id))
+    except KeyError:
+        raise HTTPException(404, "Benchmark not found.") from None
 
 
 @app.get("/api/benchmark")
 def benchmark():
-    return {
-        "id": BENCHMARK["id"],
-        "version": BENCHMARK["version"],
-        "task": BENCHMARK["task"],
-        "environment": BENCHMARK["environment"],
-        "timeout_seconds": BENCHMARK["timeout_seconds"],
-        "demo": True,
-    }
+    return public_catalog()
 
 
 @app.get("/api/runs")
@@ -110,6 +121,32 @@ def runs():
 
 @app.post("/api/runs", status_code=202)
 def create_runs(body: RunRequest):
+    return queue_runs(body)
+
+
+def queue_runs(body, parent_run_id=None):
+    health = probe_environment(force=True)
+    if not health["ready"]:
+        raise HTTPException(
+            503,
+            "Git, Docker daemon, and the sandbox image must be available.",
+        )
+    if body.adapter in PROVIDER_ADAPTERS:
+        providers = health.get("providers") or {}
+        chat = body.adapter in {"chat-completions", "openai-compatible"}
+        configured = (
+            providers.get("chat-completions")
+            if chat
+            else providers.get(body.adapter)
+        )
+        if not configured:
+            raise HTTPException(
+                400,
+                "That provider is not configured. Set PROVIDER_MODEL or ANTHROPIC_MODEL.",
+            )
+    if body.benchmark_id not in FIXTURES:
+        raise HTTPException(400, "Unknown benchmark_id.")
+
     with SUBMISSION_LOCK:
         pending = sum(
             run["status"] in storage.ACTIVE
@@ -121,7 +158,13 @@ def create_runs(body: RunRequest):
         experiment = uuid.uuid4().hex
         try:
             records = [
-                new_record(body.adapter, experiment, trial + 1)
+                new_record(
+                    body.adapter,
+                    experiment,
+                    trial + 1,
+                    parent_run_id=parent_run_id,
+                    benchmark_id=body.benchmark_id,
+                )
                 for trial in range(body.trials)
             ]
         except ValueError as exc:
@@ -139,6 +182,44 @@ def find_run(run_id):
     if record is None:
         raise HTTPException(404, "Run not found.")
     return record
+
+
+@app.post("/api/runs/{run_id}/cancel", status_code=202)
+def cancel_run(run_id: str):
+    record = find_run(run_id)
+    if record["status"] not in storage.ACTIVE:
+        raise HTTPException(409, "Only in-progress runs can be cancelled.")
+    updated = request_cancel(run_id)
+    return {
+        "id": run_id,
+        "status": updated["status"],
+        "cancel_requested": True,
+    }
+
+
+@app.post("/api/runs/{run_id}/retry", status_code=202)
+def retry_run(run_id: str):
+    original = find_run(run_id)
+    if original["status"] in storage.ACTIVE:
+        raise HTTPException(409, "Cannot retry an in-progress run.")
+    return queue_runs(
+        RunRequest(
+            adapter=original["adapter"],
+            trials=1,
+            benchmark_id=original.get("benchmark_id") or "tiny-v0.1",
+        ),
+        parent_run_id=original["id"],
+    )
+
+
+@app.delete("/api/runs/{run_id}", status_code=204)
+def delete_run(run_id: str):
+    record = find_run(run_id)
+    if record["status"] in storage.ACTIVE:
+        raise HTTPException(409, "Cannot delete an in-progress run. Cancel it first.")
+    storage.delete(run_id)
+    shutil.rmtree(storage.ARTIFACTS / run_id, ignore_errors=True)
+    return Response(status_code=204)
 
 
 @app.get("/api/runs/{run_id}")
@@ -172,6 +253,7 @@ def export_csv():
         "id", "experiment_id", "trial", "created_at", "benchmark_id",
         "task_id", "adapter", "model", "demo", "status", "resolved",
         "duration", "model_latency", "cost", "lines_added", "lines_removed",
+        "parent_run_id",
     ]
     stream = io.StringIO(newline="")
     writer = csv.DictWriter(stream, fieldnames=fields)

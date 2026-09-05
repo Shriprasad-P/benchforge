@@ -1,0 +1,54 @@
+{
+  "id": "scope-v0.1",
+  "version": "1",
+  "standard": "platform",
+  "family": "patch-scope",
+  "summary": "The harness must score a fix in the allowlisted file while leaving read-only helpers untouched.",
+  "task": {
+    "id": "scope-001",
+    "title": "Look up names through the existing normalizer",
+    "description": "lookup(table, name) should find entries after applying normalize() from util.py. util.py is already correct and must not be modified. Fix registry.py so lookups ignore surrounding whitespace and case.",
+    "repository": "bundled://name-registry",
+    "language": "Python",
+    "category": "Patch scope",
+    "constraints": [
+      "Change only registry.py.",
+      "Do not modify util.py or tests.",
+      "Use only the Python standard library."
+    ]
+  },
+  "files": {
+    "util.py": "def normalize(name):\n    return name.strip().lower()\n",
+    "registry.py": "from util import normalize\n\ndef lookup(table, name):\n    return table.get(name)\n"
+  },
+  "allowed_files": ["registry.py"],
+  "expected": {
+    "input": "lookup({'ada': 1}, ' Ada ')",
+    "returns": "1"
+  },
+  "tests": {
+    "regression": "import unittest\nfrom util import normalize\nfrom registry import lookup\n\nclass RegressionTests(unittest.TestCase):\n    def test_normalize_helper(self):\n        self.assertEqual(normalize(\" Ada \"), \"ada\")\n\n    def test_exact_key(self):\n        self.assertEqual(lookup({\"ada\": 7}, \"ada\"), 7)\n\n    def test_missing(self):\n        self.assertIsNone(lookup({\"ada\": 7}, \"zoe\"))\n",
+    "issue": "import unittest\nfrom registry import lookup\n\nclass IssueTests(unittest.TestCase):\n    def test_whitespace_and_case(self):\n        self.assertEqual(lookup({\"ada\": 1}, \" Ada \"), 1)\n"
+  },
+  "baseline": {
+    "issue_exit_code": 1,
+    "issue_stderr_must_contain": ["AssertionError", "Ran 1 test"]
+  },
+  "commands": {
+    "task": ["python", "-B", "-m", "unittest", "-v", "tests.test_issue"],
+    "regression": ["python", "-B", "-m", "unittest", "-v", "tests.test_regression"]
+  },
+  "mocks": {
+    "fixed": {
+      "registry.py": "from util import normalize\n\ndef lookup(table, name):\n    wanted = normalize(name)\n    for key, value in table.items():\n        if normalize(key) == wanted:\n            return value\n    return None\n"
+    }
+  },
+  "environment": {
+    "runtime": "Python 3.12",
+    "network": "none",
+    "memory": "256m",
+    "cpus": "1",
+    "pids": 64
+  },
+  "timeout_seconds": 30
+}

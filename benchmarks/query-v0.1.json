@@ -1,0 +1,53 @@
+{
+  "id": "query-v0.1",
+  "version": "1",
+  "standard": "application",
+  "family": "text-protocol",
+  "summary": "URL-encoded query strings must decode plus-as-space and percent sequences.",
+  "task": {
+    "id": "query-001",
+    "title": "Decode application/x-www-form-urlencoded pairs",
+    "description": "parse_query(query) receives a query string without a leading '?'. Return a dict of decoded keys and values. '+' is a space. Percent-encoded octets must be decoded. Duplicate keys keep the last value. A key with no '=' has an empty string value.",
+    "repository": "bundled://query-parse",
+    "language": "Python",
+    "category": "Protocol",
+    "constraints": [
+      "Change only query.py.",
+      "Do not change tests.",
+      "Use only the Python standard library."
+    ]
+  },
+  "files": {
+    "query.py": "def parse_query(query):\n    pairs = {}\n    if not query:\n        return pairs\n    for part in query.split(\"&\"):\n        key, _, value = part.partition(\"=\")\n        pairs[key] = value\n    return pairs\n"
+  },
+  "allowed_files": ["query.py"],
+  "expected": {
+    "input": "parse_query('q=hello+world&q=a%26b')",
+    "returns": "{'q': 'a&b'}"
+  },
+  "tests": {
+    "regression": "import unittest\nfrom query import parse_query\n\nclass RegressionTests(unittest.TestCase):\n    def test_empty(self):\n        self.assertEqual(parse_query(\"\"), {})\n\n    def test_simple_pair(self):\n        self.assertEqual(parse_query(\"a=1&b=2\"), {\"a\": \"1\", \"b\": \"2\"})\n\n    def test_flag_without_equals(self):\n        self.assertEqual(parse_query(\"verbose\"), {\"verbose\": \"\"})\n\n    def test_last_duplicate_wins(self):\n        self.assertEqual(parse_query(\"a=1&a=2\"), {\"a\": \"2\"})\n",
+    "issue": "import unittest\nfrom query import parse_query\n\nclass IssueTests(unittest.TestCase):\n    def test_plus_is_space(self):\n        self.assertEqual(parse_query(\"q=hello+world\"), {\"q\": \"hello world\"})\n\n    def test_percent_decode(self):\n        self.assertEqual(parse_query(\"q=a%26b\"), {\"q\": \"a&b\"})\n\n    def test_encoded_key(self):\n        self.assertEqual(parse_query(\"na%20me=Ada\"), {\"na me\": \"Ada\"})\n"
+  },
+  "baseline": {
+    "issue_exit_code": 1,
+    "issue_stderr_must_contain": ["AssertionError", "Ran 3 tests"]
+  },
+  "commands": {
+    "task": ["python", "-B", "-m", "unittest", "-v", "tests.test_issue"],
+    "regression": ["python", "-B", "-m", "unittest", "-v", "tests.test_regression"]
+  },
+  "mocks": {
+    "fixed": {
+      "query.py": "from urllib.parse import unquote_plus\n\ndef parse_query(query):\n    pairs = {}\n    if not query:\n        return pairs\n    for part in query.split(\"&\"):\n        key, _, value = part.partition(\"=\")\n        pairs[unquote_plus(key)] = unquote_plus(value)\n    return pairs\n"
+    }
+  },
+  "environment": {
+    "runtime": "Python 3.12",
+    "network": "none",
+    "memory": "256m",
+    "cpus": "1",
+    "pids": 64
+  },
+  "timeout_seconds": 30
+}

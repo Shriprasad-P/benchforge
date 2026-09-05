@@ -25,6 +25,11 @@ class EvaluationSpec:
 
 class RunRequest(BaseModel):
     adapter: Literal[
-        "mock-fixed", "mock-unchanged", "openai-compatible"
+        "mock-fixed",
+        "mock-unchanged",
+        "chat-completions",
+        "openai-compatible",
+        "anthropic-messages",
     ] = "mock-fixed"
+    benchmark_id: str = "tiny-v0.1"
     trials: int = Field(default=1, ge=1, le=10)
