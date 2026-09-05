@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#f6f5f1">
+  <title>BenchForge / Evaluations</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#overview">Skip to workspace</a>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="/" aria-label="BenchForge home">
+        <span class="brand-mark" aria-hidden="true">bf</span>
+        <span>BenchForge</span>
+      </a>
+
+      <nav class="main-nav" aria-label="Workspace">
+        <a href="#runs" class="selected">Evaluations</a>
+        <a href="#benchmark">Benchmark</a>
+        <a href="/openapi.json" target="_blank" rel="noopener">API schema</a>
+      </nav>
+
+      <div class="workspace-label">
+        <span class="workspace-indicator" aria-hidden="true"></span>
+        Local workspace
+        <span class="version">v0.1</span>
+      </div>
+    </div>
+  </header>
+
+  <main id="overview">
+    <section class="page-heading" aria-labelledby="page-title">
+      <div>
+        <div class="eyebrow">WORKSPACE / EVALUATIONS</div>
+        <h1 id="page-title">Evaluations</h1>
+        <p>Run a coding task. Inspect the patch. Verify the outcome.</p>
+      </div>
+      <button class="button primary" id="new-run">
+        <span class="plus" aria-hidden="true">+</span>
+        New evaluation
+      </button>
+    </section>
+
+    <section class="scope-note" aria-label="Benchmark scope">
+      <span class="scope-label">Fixture suite</span>
+      <p>
+        One synthetic Python task.
+        <strong>Mock runs test the harness, not model quality.</strong>
+      </p>
+      <a href="#benchmark">View task <span aria-hidden="true">↗</span></a>
+    </section>
+
+    <section class="metrics-grid" aria-label="Evaluation summary">
+      <article class="metric-card">
+        <div class="metric-label">Evaluations</div>
+        <div class="metric-value" id="metric-total">0</div>
+        <div class="metric-foot" id="metric-total-note">No runs yet</div>
+      </article>
+      <article class="metric-card">
+        <div class="metric-label">Provider resolution</div>
+        <div class="metric-value" id="metric-rate">—</div>
+        <div class="metric-foot" id="metric-rate-note">No eligible provider trials</div>
+      </article>
+      <article class="metric-card">
+        <div class="metric-label">Mean duration</div>
+        <div class="metric-value" id="metric-time">—</div>
+        <div class="metric-foot">Completed runs · wall time</div>
+      </article>
+      <article class="metric-card">
+        <div class="metric-label">In progress</div>
+        <div class="metric-value" id="metric-active">0</div>
+        <div class="metric-foot">2 execution workers</div>
+      </article>
+    </section>
+
+    <section class="panel runs-panel" id="runs" aria-labelledby="runs-title">
+      <div class="panel-heading runs-heading">
+        <div class="section-title">
+          <span class="section-number" aria-hidden="true">01</span>
+          <h2 id="runs-title">Evaluation runs</h2>
+          <span class="count-badge" id="run-count">0</span>
+        </div>
+        <a href="/api/export.csv" class="button secondary compact">
+          Export CSV <span aria-hidden="true">↓</span>
+        </a>
+      </div>
+
+      <div class="table-toolbar">
+        <div class="filter-tabs" role="group" aria-label="Filter runs">
+          <button class="filter-tab active" data-filter="all" aria-pressed="true">All runs</button>
+          <button class="filter-tab" data-filter="active" aria-pressed="false">In progress</button>
+          <button class="filter-tab" data-filter="resolved" aria-pressed="false">Resolved</button>
+          <button class="filter-tab" data-filter="failed" aria-pressed="false">Unresolved</button>
+        </div>
+        <label class="search-box">
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <circle cx="8.5" cy="8.5" r="5.5"></circle>
+            <path d="m13 13 4 4"></path>
+          </svg>
+          <input
+            id="search"
+            type="search"
+            placeholder="Find a model or run…"
+            aria-label="Search model or run ID"
+          >
+          <kbd aria-hidden="true">/</kbd>
+        </label>
+      </div>
+
+      <div class="table-scroll" tabindex="0" aria-label="Evaluation results table">
+        <table>
+          <caption class="sr-only">Evaluation runs and their outcomes</caption>
+          <thead>
+            <tr>
+              <th scope="col">Run / task</th>
+              <th scope="col">Model</th>
+              <th scope="col">Outcome</th>
+              <th scope="col">Duration</th>
+              <th scope="col">Changes</th>
+              <th scope="col">Created</th>
+              <th scope="col"><span class="sr-only">Inspect</span></th>
+            </tr>
+          </thead>
+          <tbody id="runs-body"></tbody>
+        </table>
+      </div>
+
+      <div id="empty-state" class="empty-state">
+        <div class="empty-document" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </div>
+        <h3>No evaluations yet.</h3>
+        <p>Start with a mock run to verify the harness, then connect a provider.</p>
+        <button class="button secondary" id="empty-run">
+          Create first evaluation <span aria-hidden="true">→</span>
+        </button>
+      </div>
+
+      <div class="table-footer">
+        <span id="table-count">0 runs</span>
+        <span id="refresh-label">Connecting to workspace…</span>
+      </div>
+    </section>
+
+    <div class="support-grid">
+      <section class="panel benchmark-panel" id="benchmark" aria-labelledby="benchmark-title">
+        <div class="panel-heading">
+          <div class="section-title">
+            <span class="section-number" aria-hidden="true">02</span>
+            <h2 id="benchmark-title">Benchmark</h2>
+          </div>
+          <span class="tag mono">tiny-v0.1</span>
+        </div>
+
+        <div class="benchmark-content">
+          <div class="benchmark-kicker">PYTHON / BUG FIX / 1 TASK</div>
+          <h3>Handle empty averages.</h3>
+          <p class="benchmark-description">
+            Make <code>average([])</code> raise an explicit validation
+            error without changing the behavior of non-empty inputs.
+          </p>
+
+          <div class="code-spec" aria-label="Expected behavior">
+            <div><span class="code-label">Input</span><code>average([])</code></div>
+            <div><span class="code-label">Raises</span><code>ValueError</code></div>
+            <div><span class="code-label">Message</span><code>"values must not be empty"</code></div>
+          </div>
+
+          <dl class="task-facts">
+            <div><dt>Editable file</dt><dd>calculator.py</dd></div>
+            <div><dt>Validation</dt><dd>Task + regression tests</dd></div>
+            <div><dt>Execution</dt><dd>Docker · no network</dd></div>
+            <div><dt>Time limit</dt><dd>30s per command</dd></div>
+          </dl>
+        </div>
+
+        <div class="panel-footer">
+          <span class="subtle">Bundled synthetic fixture</span>
+          <button class="text-button" id="fixture-run">
+            Run benchmark <span aria-hidden="true">→</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="panel comparison-panel" id="comparison" aria-labelledby="comparison-title">
+        <div class="panel-heading">
+          <div class="section-title">
+            <span class="section-number" aria-hidden="true">03</span>
+            <h2 id="comparison-title">Results by model</h2>
+          </div>
+          <span class="tag" id="comparison-count">0 models</span>
+        </div>
+
+        <p class="comparison-description">
+          Task resolution across eligible trials, grouped by adapter and model.
+        </p>
+        <div id="comparison-content" class="comparison-content"></div>
+        <div class="chart-note">
+          Infrastructure errors, interrupted runs, and invalid baselines
+          are excluded. Mock trials are shown separately and do not
+          measure model quality.
+        </div>
+      </section>
+    </div>
+
+    <footer class="page-footer">
+      <span>BenchForge <span class="footer-divider">/</span> Local evaluation workspace</span>
+      <span>Selected source context leaves this machine when using a provider.</span>
+    </footer>
+  </main>
+
+  <dialog id="run-dialog" aria-labelledby="run-dialog-title">
+    <form id="run-form">
+      <div class="dialog-heading">
+        <div>
+          <div class="eyebrow">NEW RUN</div>
+          <h2 id="run-dialog-title">Configure evaluation</h2>
+        </div>
+        <button type="button" class="icon-button" id="close-dialog" aria-label="Close">
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="m5 5 10 10M15 5 5 15"></path>
+          </svg>
+        </button>
+      </div>
+
+      <p class="dialog-description">
+        Each trial starts from a clean fixture. Repository tests run inside Docker.
+      </p>
+
+      <div class="selected-benchmark">
+        <div>
+          <span class="field-caption">BENCHMARK</span>
+          <strong>Tiny Calculator</strong>
+          <span class="subtle mono">tiny-v0.1 / calculator-001</span>
+        </div>
+        <span class="tag">1 task</span>
+      </div>
+
+      <label class="field" for="adapter">
+        <span>Model adapter</span>
+        <select id="adapter">
+          <option value="mock-fixed">Mock / fixed — expected to pass</option>
+          <option value="mock-unchanged">Mock / unchanged — expected to fail</option>
+          <option value="openai-compatible">OpenAI-compatible provider</option>
+        </select>
+      </label>
+
+      <label class="field" for="trials">
+        <span>Repeated trials</span>
+        <input id="trials" type="number" min="1" max="10" step="1" value="1" required>
+        <small>Run the same task between 1 and 10 times.</small>
+      </label>
+
+      <div class="form-note" id="adapter-note">
+        Mock adapters are deterministic smoke tests. They verify the
+        evaluation harness, not a model's coding ability.
+      </div>
+
+      <div class="environment-box">
+        <span class="field-caption">ENVIRONMENT</span>
+        <span id="docker-info">Checking local configuration…</span>
+      </div>
+
+      <p id="form-error" class="form-error" role="alert" hidden></p>
+
+      <div class="dialog-actions">
+        <button type="button" class="button secondary" id="cancel-dialog">Cancel</button>
+        <button type="submit" class="button primary" id="submit-run">
+          Start evaluation <span aria-hidden="true">→</span>
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="detail-dialog" class="detail-dialog" aria-labelledby="detail-title">
+    <div class="detail-header">
+      <div>
+        <div class="eyebrow">RUN INSPECTOR</div>
+        <h2 id="detail-title">Evaluation details</h2>
+      </div>
+      <button class="icon-button" id="close-detail" aria-label="Close details">
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <path d="m5 5 10 10M15 5 5 15"></path>
+        </svg>
+      </button>
+    </div>
+    <div id="detail-content"></div>
+  </dialog>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

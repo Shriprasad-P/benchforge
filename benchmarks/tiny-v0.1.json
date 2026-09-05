@@ -1,0 +1,26 @@
+{
+  "id": "tiny-v0.1",
+  "version": "1",
+  "task": {
+    "id": "calculator-001",
+    "title": "Handle empty averages correctly",
+    "description": "The average(values) function currently raises ZeroDivisionError for an empty collection. Change it to raise ValueError with the exact message 'values must not be empty'. Preserve the existing behavior for non-empty numeric collections.",
+    "repository": "bundled://tiny-calculator",
+    "language": "Python",
+    "category": "Bug fix",
+    "constraints": [
+      "Change only calculator.py.",
+      "Do not change tests.",
+      "Use only the Python standard library."
+    ]
+  },
+  "source": "def average(values):\n    return sum(values) / len(values)\n",
+  "environment": {
+    "runtime": "Python 3.12",
+    "network": "none",
+    "memory": "256m",
+    "cpus": "1",
+    "pids": 64
+  },
+  "timeout_seconds": 30
+}
