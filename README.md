@@ -2,12 +2,14 @@
 
 A local-first coding evaluation starter with a responsive web dashboard.
 
+BenchForge provides a self-contained environment for running and evaluating code generation tasks against Python benchmarks.
+
 ## Requirements
 
-- Python 3.11+ (3.13 recommended; 3.14 needs current pydantic wheels)
-- Git
-- Docker Engine or Docker Desktop, running
-- An explicitly pulled Python sandbox image
+- **Python** 3.11+ (3.13 recommended; 3.14 needs current pydantic wheels)
+- **Git** for repository operations
+- **Docker Engine** or Docker Desktop, running
+- **Python sandbox image** (explicitly pulled via `docker pull`)
 
 ## Start
 
@@ -21,10 +23,9 @@ docker pull python:3.12-slim
 uvicorn benchforge.main:app --host 127.0.0.1 --port 8000
 ```
 
-Open http://127.0.0.1:8000
+Open <http://127.0.0.1:8000> in your browser.
 
-Use one Uvicorn worker. This starter uses an in-process job queue, not a
-distributed scheduler. Do not use --reload while evaluations are running.
+**Note:** Use one Uvicorn worker only. This starter uses an in-process job queue, not a distributed scheduler. Do not use `--reload` while evaluations are running.
 
 ## Included
 
